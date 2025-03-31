@@ -1,0 +1,1 @@
+Command-line helper tools for interactive scale construction and viewing interval structure of scales in rational intonation (ratio-based interval sizes.)
