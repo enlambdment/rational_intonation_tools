@@ -5,47 +5,64 @@ from sympy import factorint
 from termcolor import colored
 from typing import Dict, List, Optional, Sequence, Set
 
-'''
-# TODO - adapt this code for my use case
-
 from rich import print
 import colorsys
 
-def generate_rich_colors(base_hue, n, hue_range=0.05):
-    """Generate n colors within a small hue range around base_hue."""
-    return [
-        "#{:02x}{:02x}{:02x}".format(
-            *[int(c * 255) for c in colorsys.hls_to_rgb(
-                base_hue + ((i / (n - 1)) * 2 - 1) * hue_range,  # Vary within a narrow band
-                0.5,  # Keep lightness constant
-                1     # Keep saturation high
-            )]
-        ) 
-        for i in range(n)
-    ]
-
-# Base hue for magenta (0.83 in HSL) and generate 5 variations within a small hue range
-base_hue_magenta = 0.83
-colors = generate_rich_colors(base_hue_magenta, 5, hue_range=0.02)  # Limit hue variation
-
-# Example fractions
-fractions = ["7/4", "7/12", "21/12", "49/36", "35/24"]
-
-# Print each fraction with a slightly different magenta shade
-for frac, color in zip(fractions, colors):
-    print(f"[{color}]{frac}[/{color}]")  # Uses hex color in rich
+def generate_rich_colors(base_hue: Optional[float], n, hue_range=0.2):
+	"""Generate n colors within a small hue range around base_hue."""
+	if base_hue is not None:
+		return [
+			"#{:02x}{:02x}{:02x}".format(
+				*[int(c * 255) for c in colorsys.hls_to_rgb(
+					base_hue + ((i / (n - 1)) * 2 - 1) * hue_range,  # Vary within a narrow band
+					0.5,  # Keep lightness constant
+					1     # Keep saturation high
+				)]
+			) 
+			for i in range(n)
+		]
+	else:
+		return [
+			"#{:02x}{:02x}{:02x}".format(
+				# same, unvarying dark grey
+				*[int(c * 255) for c in colorsys.hls_to_rgb(0.0, 0.3, 0.0)]
+			)
+			for _ in range(n) 
+		]
+		
+'''
+TODO: Instead of hardcoding a color assignment from prime limits to
+certain hues, identify the prime limits used in the scale, then perform
+a runtime mapping from thosen primes to the first n colors listed below.
+That way, the base hues are well spread out visually in color space (as
+this list order was originally contrived to accomplish) without having
+to change things around in the source code.
 '''
 
 # Mapping from prime limits to their display colors.
 LIMIT_COLORS = {
 	2: "dark_grey",
-	3: "cyan",
-	5: "green",
-	7: "magenta",
+	3: "blue",
+	5: "yellow",
+	7: "green",
 	11: "red",
-	13: "yellow"
+	13: "cyan",
+	17: "orange",
+	19: "magenta"
 }
 
+# Approximate HSL hue value for certain colors. 
+# Note that gray has no hue (because saturation = 0).
+COLORS_TO_HUES: dict[str, Optional[float]] = {
+	"dark_grey": None,
+	"red": 0.0,
+	"orange": 0.083,
+	"yellow": 0.167,
+	"green": 0.333,
+	"cyan": 0.5,
+	"blue": 0.667,
+	"magenta": 0.833,
+}
 
 """
 Given a list of ratios representing pitch 
@@ -60,17 +77,7 @@ def get_prime_limit(ratio: Fraction) -> Optional[int]:
 	else:
 		return max(primes.keys())
 
-
-def color_code_ratio(ratio: Fraction):
-	limit = get_prime_limit(ratio)
-	return LIMIT_COLORS.get(limit, "white")
-
-
-# TODO - Decide how to color code ratios having the same
-# limit *similarly*, yet assign *distinct* colors to every
-# equivalence class of ratio (where ratios are identified
-# up to octave equivalence i.e. differing only by a power of 2)
-def classify_intervals(intervals: Sequence[Fraction]):
+def classify_intervals(intervals: Sequence[Fraction]) -> Dict[Fraction, Set[Fraction]]:
 	equivalence_classes: Dict[Fraction, Set[Fraction]] = defaultdict(set)
 	for interval in intervals:
 		match = None
@@ -103,25 +110,74 @@ def show_fraction(fraction: Fraction, show_padding: bool = True) -> str:
 	frac_str = f"{fraction.numerator}/{fraction.denominator}"
 	return (f"{frac_str:>12}" if show_padding else frac_str)
 
-def color_fraction(fraction: Fraction) -> str:
-	attrs = ["bold"] if fraction > 1 else ["dark"]
-	return colored(show_fraction(fraction), color_code_ratio(fraction), attrs=attrs)
+def rich_format_fraction(fraction: Fraction, color_str: Optional[str] = None, show_padding: bool = True) -> str:
+	shown_fraction = show_fraction(fraction, show_padding)
 
-def print_interval_series(series: List[Fraction], apply_coloring: bool = False) -> List[str]:
-	interval_strs = [
-		(color_fraction(interval) if apply_coloring else show_fraction(interval))
-		for interval in series
-	]
-	return interval_strs
+	styles = []
+	if color_str is not None:
+		styles.append(color_str)
+		strength = "bold" if fraction > 1 else "dim"
+		styles.append(strength)
+	else:
+		styles.append("default") # the default color for use in printing header and row labels
+
+	style_str = " ".join(styles)
+	return f"[{style_str}]{shown_fraction}[/{style_str}]" # if len(styles) != 0 else shown_fraction
+
+def rich_format_interval_series(series: List[Fraction], color_map: Dict[Fraction, str]):
+	return " ".join(
+		rich_format_fraction(fraction, color_map[fraction]) for fraction in series
+	)
+
+def assign_colors(
+	classified_intervals: Dict[Fraction, Set[Fraction]], 
+	classified_delegates: Dict[int, Set[Fraction]]
+) -> Dict[Fraction, str]:
+	interval_colors = dict()
+
+	for prime_limit, delegates in classified_delegates.items():
+		delegate_count = len(delegates)
+		prime_hue = COLORS_TO_HUES[LIMIT_COLORS[prime_limit]]
+		prime_colors = generate_rich_colors(prime_hue, delegate_count)
+		# debug
+		print(f"For prime {prime_limit}, generated colors {prime_colors}")
+
+		delegate_colors = zip(delegates, prime_colors)
+		for delegate, color in delegate_colors:
+			matches = classified_intervals[delegate]
+			for match in matches:
+				interval_colors[match] = color
+
+	return interval_colors
+
 
 def print_cross_intervals(pitch_ratios: List[Fraction]):
 	interval_serieses = get_intervals(pitch_ratios)
-	header = [f"{'':>12}"] + print_interval_series(pitch_ratios)
+	header = [f"{'':>12}"] + [rich_format_fraction(f) for f in pitch_ratios]
+	
+	# flatten in order to classify all intervals present between pitch classes, up to octave equivalence
+	classified_intervals = classify_intervals([intv for series in interval_serieses for intv in series])
+	
+	# now we have to group the delegates by prime limit, to decide how to split up color space upon print
+	classified_delegates = defaultdict(set)
+	for delegate, _ in classified_intervals.items():
+		delegate_prime_limit = get_prime_limit(delegate)
+		classified_delegates[(delegate_prime_limit or 2)].add(delegate)
+
+	# we have to assign a color per each delegate of an octave-equivalent interval class
+	# so check how many delegates share the same color code, then divide color space accordingly
+	color_assignments = assign_colors(classified_intervals, classified_delegates)
+
+	# debug
+	print(color_assignments)
+
 	print(' '.join(header))
 	for idx, series in enumerate(interval_serieses):
 		print(
-			f"{show_fraction(pitch_ratios[idx]):>12}" + "|" + ' '.join(print_interval_series(series, apply_coloring=True))
+			rich_format_fraction(pitch_ratios[idx]) + "|" + rich_format_interval_series(series, color_assignments)
 		)
 
 pairs = [(1,1), (88,81), (12,11), (9,8), (32,27), (11,9), (4,3), (11,8), (16,11), (3,2), (18,11), (27,16), (16,9), (11,6), (81,44)]
 ratios = [Fraction(n,d) for n,d in pairs]
+
+sample_scale = [Fraction(n,d) for n,d in [(1,1), (9,8), (297,256), (11,9), (4,3), (3,2), (99,64), (18,11), (16,9)]]
